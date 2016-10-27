@@ -5,6 +5,17 @@ sockem puts itself between your application's socket and the remote peer server,
 introducing network latency, throughput restrictions, etc. to emulate
 network problems.
 
+## WIP
+
+sockem currently only provides the infrastructure for traffic shaping, but
+does not yet actually implement any of it.
+
+The only usable option for now is to force connection close through
+sockem_close().
+
+Dont despair, @andoma will add proper traffic shaping support shortly.
+
+
 ## Uses
 
 There are two ways to use sockem:
