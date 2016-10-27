@@ -1,12 +1,17 @@
 # sockem
 Socket-level network emulation
 
+sockem puts itself between your application's socket and the remote peer server,
+introducing network latency, throughput restrictions, etc. to emulate
+network problems.
+
 
 # Inclusion
 
 Add `sockem.c` and `sockem.h` to your application build system.
 
 Compile with `-lpthread` or similar.
+
 
 # Usage
 
@@ -38,3 +43,8 @@ Example:
     /* And finally */
     close(sockfd);
 
+
+
+`sockem_close()` may be used spontanoeusly to force the connection to be
+closed. From the application's point of view it will seem as if the
+remote peer had closed the connection.
