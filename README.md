@@ -9,11 +9,10 @@ network problems.
 
 sockem currently only provides the infrastructure for traffic shaping, but
 does not yet actually implement any of it.
-
 The only usable option for now is to force connection close through
 sockem_close().
 
-Dont despair, @andoma will add proper traffic shaping support shortly.
+Dont despair, (@andoma)[https://github.com/andoma] will add proper traffic shaping support shortly.
 
 
 ## Uses
@@ -22,13 +21,13 @@ There are two ways to use sockem:
  * Modifying the program to call sockem instead of the standard socket API,
    this allows real-time sockem config changes to sockets, .e.g, forcing
    connections to close, changing latency or thruput, etc.
-   See the [#Inclusion] section below.
+   See the [Inclusion](#inclusion) section below.
  * Overloading the libc API. This requires no changes or even recompilation
-   of existing applications but simply LD_PRELOAD:ing libsockem prior to running
-   the application. sockem configuration is provided through the SOCKEM_CONF
+   of existing applications but simply `LD_PRELOAD`:ing libsockem prior to running
+   the application. sockem configuration is provided through the `SOCKEM_CONF`
    environment variable. Realtime sockem config changes are not possible
    in this mode.
-   See the [#Preloading] section below.
+   See the [Preloading](#preloading) section below.
 
 
 # Inclusion
