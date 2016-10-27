@@ -82,7 +82,7 @@ mklove-check:
 
 lib: $(LIBFILENAME) $(LIBNAME).a $(LIBFILENAMELINK) lib-gen-pkg-config
 
-$(LIBFILENAME): $(OBJS) $(LIBNAME).lds
+$(LIBFILENAME): $(OBJS)
 	@printf "$(MKL_YELLOW)Creating shared library $@$(MKL_CLR_RESET)\n"
 	$(CC) $(LDFLAGS) $(LIB_LDFLAGS) $(OBJS) -o $@ $(LIBS)
 
