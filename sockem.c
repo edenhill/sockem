@@ -68,6 +68,9 @@ static mtx_t sockem_lock;
 
 static LIST_HEAD(, sockem_s) sockems;
 
+
+typedef int64_t sockem_ts_t;
+
 struct sockem_conf {
         /* FIXME: these needs to be implemented */
         int tx_thruput;  /* app->peer bytes/second */
@@ -78,13 +81,14 @@ struct sockem_conf {
 };
 
 
+
+
 struct sockem_s {
         LIST_ENTRY(sockem_s) link;
 
         int run;       /* Forwarder thread run bool */
         
         int as;        /* application's socket. */
-        int cs;        /* internal application connection socket */
         int ls;        /* internal application listen socket */
         int ps;        /* internal peer socket connecting sockem to the peer.*/
 
@@ -181,11 +185,6 @@ static int sockem_recv_fwd (sockem_t *skm, int ifd, int ofd) {
 static void sockem_close_all (sockem_t *skm) {
         int serr = socket_errno();
 
-        if (skm->cs != -1) {
-                close(skm->cs);
-                skm->cs = -1;
-        }
-
         if (skm->ls != -1) {
                 close(skm->ls);
                 skm->ls = -1;
@@ -206,27 +205,39 @@ static void sockem_close_all (sockem_t *skm) {
 /**
  * @brief sockem internal per-socket forwarder thread
  */
-static int sockem_run (void *arg) {
+static void *sockem_run (void *arg) {
         sockem_t *skm = arg;
         int waittime;
+        int cs = -1;
+        int ls;
         struct pollfd pfd[2];
 
         mtx_lock(&skm->lock);
+        skm->run = 1;
         skm->use = skm->conf;
+        ls = skm->ls;
         mtx_unlock(&skm->lock);
 
         skm->bufsz = skm->use.bufsz;
         skm->buf = malloc(skm->bufsz);
 
         /* Accept connection from sockfd in sockem_connect() */
-        skm->cs = accept(skm->ls, NULL, 0);
-        assert(skm->cs != -1);
+        cs = accept(ls, NULL, 0);
+        if (cs == -1) {
+                mtx_lock(&skm->lock);
+                if (!skm->run)
+                        goto done;
+                assert(cs != -1);
+        }
 
         /* Set up poll (blocking IO) */
         memset(pfd, 0, sizeof(pfd));
-        pfd[0].fd = skm->cs;
+        pfd[0].fd = cs;
         pfd[0].events = POLLIN;
+
+        mtx_lock(&skm->lock);
         pfd[1].fd = skm->ps;
+        mtx_unlock(&skm->lock);
         pfd[1].events = POLLIN;
 
         waittime = sockem_calc_waittime(skm);
@@ -259,13 +270,16 @@ static int sockem_run (void *arg) {
                 mtx_lock(&skm->lock);
                 skm->use = skm->conf;
         }
+ done:
+        if (cs != -1)
+                close(cs);
         sockem_close_all(skm);
 
         mtx_unlock(&skm->lock);
         free(skm->buf);
 
 
-        return 0;
+        return NULL;
 }
 
 
@@ -343,7 +357,6 @@ sockem_t *sockem_connect (int sockfd, const struct sockaddr *addr,
         /* Create sockem handle */
         skm = calloc(1, sizeof(*skm));
         skm->as = sockfd;
-        skm->cs = -1;
         skm->ls = ls;
         skm->ps = ps;
         mtx_init(&skm->lock);
@@ -365,7 +378,6 @@ sockem_t *sockem_connect (int sockfd, const struct sockaddr *addr,
         va_end(ap);
 
         mtx_lock(&skm->lock);
-        skm->run = 1;
 
         /* Create pipe thread */
         if (thrd_create(&skm->thrd, sockem_run, skm) != 0) {
@@ -373,7 +385,6 @@ sockem_t *sockem_connect (int sockfd, const struct sockaddr *addr,
                 sockem_close(skm);
                 return NULL;
         }
-
         mtx_unlock(&skm->lock);
 
         /* Connect application socket to listen socket */
