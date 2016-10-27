@@ -7,10 +7,9 @@ SRCS=sockem.c
 HDRS=sockem.h
 OBJS=$(SRCS:.c=.o)
 
-LIBS+=-lpthread -lrt
+LIBS+=-lpthread -lrt -ldl
 
-# Preloading is WIP, will not work now.
-#CPPFLAGS+=-DLIBSOCKEM_PRELOAD
+CPPFLAGS+=-DLIBSOCKEM_PRELOAD
 
 -include Makefile.config
 

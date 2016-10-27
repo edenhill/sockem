@@ -26,7 +26,7 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#define _GNU_SOURCE /* for strdupa() */
+#define _GNU_SOURCE /* for strdupa() and RTLD_NEXT */
 #include <errno.h>
 #include <unistd.h>
 #include <stdlib.h>
@@ -36,6 +36,7 @@
 #include <poll.h>
 #include <assert.h>
 #include <netinet/in.h>
+#include <dlfcn.h>
 
 #include "sockem.h"
 
@@ -71,12 +72,27 @@ static LIST_HEAD(, sockem_s) sockems;
 
 typedef int64_t sockem_ts_t;
 
+static pthread_once_t sockem_once = PTHREAD_ONCE_INIT;
+static int (*sockem_orig_connect) (int, const struct sockaddr *, socklen_t);
+static int (*sockem_orig_close) (int);
+static char *sockem_conf_str = "";
+
+#ifdef LIBSOCKEM_PRELOAD
+#define sockem_close0(S)        (sockem_orig_close(S))
+#define sockem_connect0(S,A,AL) (sockem_orig_connect(S,A,AL))
+#else
+#define sockem_close0(S)        close(S)
+#define sockem_connect0(S,A,AL) connect(S,A,AL)
+#endif
+
+
 struct sockem_conf {
         /* FIXME: these needs to be implemented */
         int tx_thruput;  /* app->peer bytes/second */
         int rx_thruput;  /* peer->app bytes/second */
         int delay;       /* latency in ms */
         int jitter;      /* latency variation in ms */
+        int debug;       /* enable sockem printf debugging */
         size_t bufsz;    /* recv chunk/buffer size */
 };
 
@@ -186,12 +202,12 @@ static void sockem_close_all (sockem_t *skm) {
         int serr = socket_errno();
 
         if (skm->ls != -1) {
-                close(skm->ls);
+                sockem_close0(skm->ls);
                 skm->ls = -1;
         }
 
         if (skm->ps != -1) {
-                close(skm->ps);
+                sockem_close0(skm->ps);
                 skm->ps = -1;
         }
 
@@ -272,7 +288,7 @@ static void *sockem_run (void *arg) {
         }
  done:
         if (cs != -1)
-                close(cs);
+                sockem_close0(cs);
         sockem_close_all(skm);
 
         mtx_unlock(&skm->lock);
@@ -284,16 +300,14 @@ static void *sockem_run (void *arg) {
 
 
 
-
 /**
  * @brief Connect socket \p s to \p addr
  */
-static int sockem_connect0 (int s, const struct sockaddr *addr,
-                            socklen_t addrlen) {
+static int sockem_do_connect (int s, const struct sockaddr *addr,
+                              socklen_t addrlen) {
         int r;
 
-        /* FIXME: if LIBSOCKEM_PRELOAD: reach libc connect() somehow */
-        r = connect(s, addr, addrlen);
+        r = sockem_connect0(s, addr, addrlen);
         if (r == SOCKET_ERROR) {
                 int serr = socket_errno();
                 if (serr != EINPROGRESS
@@ -325,32 +339,32 @@ sockem_t *sockem_connect (int sockfd, const struct sockaddr *addr,
                 return NULL;
 
         if (bind(ls, (struct sockaddr *)&sin6, addrlen) == -1) {
-                close(ls);
+                sockem_close0(ls);
                 return NULL;
         }
 
         /* Get bound address */
         if (getsockname(ls, (struct sockaddr *)&sin6, &addrlen2) == -1) {
-                close(ls);
+                sockem_close0(ls);
                 return NULL;
         }
 
         if (listen(ls, 1) == -1) {
-                close(ls);
+                sockem_close0(ls);
                 return NULL;
         }
 
         /* Create internal peer socket */
         ps = socket(addr->sa_family, SOCK_STREAM, IPPROTO_TCP);
         if (ps == -1) {
-                close(ls);
+                sockem_close0(ls);
                 return NULL;
         }
 
         /* Connect to peer */
-        if (sockem_connect0(ps, addr, addrlen) == -1) {
-                close(ls);
-                close(ps);
+        if (sockem_do_connect(ps, addr, addrlen) == -1) {
+                sockem_close0(ls);
+                sockem_close0(ps);
                 return NULL;
         }
 
@@ -440,6 +454,8 @@ static int sockem_set0 (sockem_t *skm, const char *key, int val) {
                 skm->conf.jitter = val;
         else if (!strcmp(key, "rx.bufsz"))
                 skm->conf.bufsz = val;
+        else if (!strcmp(key, "debug"))
+                skm->conf.debug = val;
         else if (!strcmp(key, "true"))
                 ; /* dummy key for allowing non-empty but default config */
         else if (!strchr(key, ',')) {
@@ -513,16 +529,17 @@ sockem_t *sockem_find (int sockfd) {
 /**
  * Provide overloading socket APIs and conf bootstrapping from env vars.
  *
- * FIXME: This is a mock-up, wont work.
  */
-
-static pthread_once_t sockem_once = PTHREAD_ONCE_INIT;
 
 /**
  * @brief Initialize preloadable libsockem once.
  */
 static void sockem_init (void) {
         mtx_init(&sockem_lock);
+        sockem_conf_str = getenv("SOCKEM_CONF");
+        fprintf(stderr, "%% libsockem pre-loaded (%s)\n", sockem_conf_str);
+        sockem_orig_connect = dlsym(RTLD_NEXT, "connect");
+        sockem_orig_close = dlsym(RTLD_NEXT, "close");
 }
 
 
@@ -531,11 +548,10 @@ static void sockem_init (void) {
  */
 int connect (int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
         sockem_t *skm;
-        char *conf = getenv("SOCKEM_CONF");
 
         pthread_once(&sockem_once, sockem_init);
 
-        skm = sockem_connect(sockfd, addr, addrlen, conf, 0, NULL);
+        skm = sockem_connect(sockfd, addr, addrlen, sockem_conf_str, 0, NULL);
         if (!skm)
                 return -1;
 
@@ -557,8 +573,7 @@ int close (int fd) {
                 sockem_close(skm);
         mtx_unlock(&sockem_lock);
 
-        /* FIXME: reach libc close() somehow */
-        return close(fd);
+        return sockem_close0(fd);
 }
 
 #endif
