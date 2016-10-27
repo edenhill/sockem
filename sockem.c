@@ -62,6 +62,10 @@ typedef pthread_t thrd_t;
   pthread_join(THRD, NULL)
 
 
+#ifdef LIBSOCKEM_PRELOAD
+static mtx_t sockem_lock;
+#endif
+
 static LIST_HEAD(, sockem_s) sockems;
 
 struct sockem_conf {
@@ -274,6 +278,7 @@ static int sockem_connect0 (int s, const struct sockaddr *addr,
                             socklen_t addrlen) {
         int r;
 
+        /* FIXME: if LIBSOCKEM_PRELOAD: reach libc connect() somehow */
         r = connect(s, addr, addrlen);
         if (r == SOCKET_ERROR) {
                 int serr = socket_errno();
@@ -377,7 +382,14 @@ sockem_t *sockem_connect (int sockfd, const struct sockaddr *addr,
                 return NULL;
         }
 
+#ifdef LIBSOCKEM_PRELOAD
+        mtx_lock(&sockem_lock);
+#endif
         LIST_INSERT_HEAD(&sockems, skm, link);
+
+#ifdef LIBSOCKEM_PRELOAD
+        mtx_unlock(&sockem_lock);
+#endif
 
         return skm;
 }
@@ -392,6 +404,7 @@ void sockem_close (sockem_t *skm) {
 
         mtx_destroy(&skm->lock);
 
+        /* LIBSOCKEM_PRELOAD: calling must hold sockem_lock. */
         LIST_REMOVE(skm, link);
 
         free(skm);
@@ -483,3 +496,58 @@ sockem_t *sockem_find (int sockfd) {
 
         return NULL;
 }
+
+
+#ifdef LIBSOCKEM_PRELOAD
+/**
+ * Provide overloading socket APIs and conf bootstrapping from env vars.
+ *
+ * FIXME: This is a mock-up, wont work.
+ */
+
+static pthread_once_t sockem_once = PTHREAD_ONCE_INIT;
+
+/**
+ * @brief Initialize preloadable libsockem once.
+ */
+static void sockem_init (void) {
+        mtx_init(&sockem_lock);
+}
+
+
+/**
+ * @brief connect(2) overload
+ */
+int connect (int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
+        sockem_t *skm;
+        char *conf = getenv("SOCKEM_CONF");
+
+        pthread_once(&sockem_once, sockem_init);
+
+        skm = sockem_connect(sockfd, addr, addrlen, conf, 0, NULL);
+        if (!skm)
+                return -1;
+
+        return 1;
+}
+
+/**
+ * @brief close(2) overload
+ */
+int close (int fd) {
+        sockem_t *skm;
+
+        pthread_once(&sockem_once, sockem_init);
+
+        mtx_lock(&sockem_lock);
+        skm = sockem_find(fd);
+
+        if (skm)
+                sockem_close(skm);
+        mtx_unlock(&sockem_lock);
+
+        /* FIXME: reach libc close() somehow */
+        return close(fd);
+}
+
+#endif
