@@ -39,8 +39,7 @@
 
 #include "sockem.h"
 
-#include "../src/tinycthread.h"
-#include "../src/rdsysqueue.h"
+#include <sys/queue.h>
 
 #ifdef _MSC_VER
 #define socket_errno() WSAGetLastError()
@@ -49,8 +48,19 @@
 #define SOCKET_ERROR -1
 #endif
 
+#include <pthread.h>
+typedef pthread_mutex_t mtx_t;
+#define mtx_init(M) pthread_mutex_init(M, NULL)
+#define mtx_destroy(M) pthread_mutex_destroy(M)
+#define mtx_lock(M) pthread_mutex_lock(M)
+#define mtx_unlock(M) pthread_mutex_unlock(M)
 
-typedef int64_t sockem_ts_t;
+typedef pthread_t thrd_t;
+#define thrd_create(THRD,START_ROUTINE,ARG) \
+  pthread_create(THRD, NULL, START_ROUTINE, ARG)
+#define thrd_join(THRD,RETVAL) \
+  pthread_join(THRD, NULL)
+
 
 static LIST_HEAD(, sockem_s) sockems;
 
@@ -331,7 +341,7 @@ sockem_t *sockem_connect (int sockfd, const struct sockaddr *addr,
         skm->cs = -1;
         skm->ls = ls;
         skm->ps = ps;
-        mtx_init(&skm->lock, mtx_plain);
+        mtx_init(&skm->lock);
 
         /* Default config*/
         skm->conf.rx_thruput = 1 << 30;
@@ -353,7 +363,7 @@ sockem_t *sockem_connect (int sockfd, const struct sockaddr *addr,
         skm->run = 1;
 
         /* Create pipe thread */
-        if (thrd_create(&skm->thrd, sockem_run, skm) != thrd_success) {
+        if (thrd_create(&skm->thrd, sockem_run, skm) != 0) {
                 mtx_unlock(&skm->lock);
                 sockem_close(skm);
                 return NULL;
@@ -372,15 +382,13 @@ sockem_t *sockem_connect (int sockfd, const struct sockaddr *addr,
         return skm;
 }
 
-
 void sockem_close (sockem_t *skm) {
-        int r;
 
         mtx_lock(&skm->lock);
         sockem_close_all(skm);
         mtx_unlock(&skm->lock);
 
-        thrd_join(skm->thrd, &r);
+        thrd_join(skm->thrd, NULL);
 
         mtx_destroy(&skm->lock);
 
