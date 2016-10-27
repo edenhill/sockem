@@ -12,7 +12,7 @@ does not yet actually implement any of it.
 The only usable option for now is to force connection close through
 sockem_close().
 
-Dont despair, (@andoma)[https://github.com/andoma] will add proper traffic shaping support shortly.
+Dont despair, [@andoma](https://github.com/andoma) will add proper traffic shaping support shortly.
 
 
 ## Uses
