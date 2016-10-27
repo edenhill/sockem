@@ -1,0 +1,4 @@
+mkl_require lib
+mkl_require pic
+mkl_require good_cflags
+
