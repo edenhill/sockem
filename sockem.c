@@ -102,7 +102,13 @@ struct sockem_conf {
 struct sockem_s {
         LIST_ENTRY(sockem_s) link;
 
-        int run;       /* Forwarder thread run bool */
+        enum {
+                /* Forwarder thread run states */
+                SOCKEM_INIT,
+                SOCKEM_START,
+                SOCKEM_RUN,
+                SOCKEM_TERM
+        } run;
 
         int as;        /* application's socket. */
         int ls;        /* internal application listen socket */
@@ -110,6 +116,8 @@ struct sockem_s {
 
         void *buf;     /* Receive buffer */
         size_t bufsz;  /* .. size */
+
+        int linked;    /* On sockems list */
 
         thrd_t thrd;   /* Forwarder thread */
 
@@ -211,7 +219,7 @@ static void sockem_close_all (sockem_t *skm) {
                 skm->ps = -1;
         }
 
-        skm->run = 0;
+        skm->run = SOCKEM_TERM;
 
         errno = serr;
 }
@@ -229,7 +237,8 @@ static void *sockem_run (void *arg) {
         struct pollfd pfd[2];
 
         mtx_lock(&skm->lock);
-        skm->run = 1;
+        if (skm->run == SOCKEM_START)
+                skm->run = SOCKEM_RUN;
         skm->use = skm->conf;
         ls = skm->ls;
         mtx_unlock(&skm->lock);
@@ -241,8 +250,12 @@ static void *sockem_run (void *arg) {
         cs = accept(ls, NULL, 0);
         if (cs == -1) {
                 mtx_lock(&skm->lock);
-                if (!skm->run)
+                if (skm->run == SOCKEM_TERM) {
+                        /* App socket was closed. */
                         goto done;
+                }
+                fprintf(stderr, "%% sockem: accept(%d) failed: %s\n",
+                        ls, strerror(socket_errno()));
                 assert(cs != -1);
         }
 
@@ -259,7 +272,7 @@ static void *sockem_run (void *arg) {
         waittime = sockem_calc_waittime(skm);
 
         mtx_lock(&skm->lock);
-        while (skm->run) {
+        while (skm->run == SOCKEM_RUN) {
                 int r;
                 int i;
 
@@ -271,13 +284,13 @@ static void *sockem_run (void *arg) {
 
                 for (i = 0 ; r > 0 && i < 2 ; i++) {
                         if (pfd[i].revents & (POLLHUP|POLLERR)) {
-                                skm->run = 0;
+                                skm->run = SOCKEM_TERM;
 
                         } else if (pfd[i].revents & POLLIN) {
                                 if (sockem_recv_fwd(skm,
                                                     pfd[i].fd,
                                                     pfd[i^1].fd) == -1) {
-                                        skm->run = 0;
+                                        skm->run = SOCKEM_TERM;
                                         break;
                                 }
                         }
@@ -392,6 +405,7 @@ sockem_t *sockem_connect (int sockfd, const struct sockaddr *addr,
         va_end(ap);
 
         mtx_lock(&skm->lock);
+        skm->run = SOCKEM_START;
 
         /* Create pipe thread */
         if (thrd_create(&skm->thrd, sockem_run, skm) != 0) {
@@ -406,6 +420,10 @@ sockem_t *sockem_connect (int sockfd, const struct sockaddr *addr,
                 sockem_close(skm);
                 return NULL;
         }
+
+        mtx_lock(&skm->lock);
+        skm->linked = 1;
+        mtx_unlock(&skm->lock);
 
 #ifdef LIBSOCKEM_PRELOAD
         mtx_lock(&sockem_lock);
@@ -422,15 +440,25 @@ sockem_t *sockem_connect (int sockfd, const struct sockaddr *addr,
 void sockem_close (sockem_t *skm) {
 
         mtx_lock(&skm->lock);
-        sockem_close_all(skm);
+
+        /* If thread is running let it close the sockets
+         * to avoid race condition. */
+        if (skm->run == SOCKEM_START ||
+            skm->run == SOCKEM_RUN)
+                skm->run = SOCKEM_TERM;
+        else
+                sockem_close_all(skm);
+
+        /* LIBSOCKEM_PRELOAD: caller must hold sockem_lock. */
+        if (skm->linked)
+                LIST_REMOVE(skm, link);
+
         mtx_unlock(&skm->lock);
 
         thrd_join(skm->thrd, NULL);
 
         mtx_destroy(&skm->lock);
 
-        /* LIBSOCKEM_PRELOAD: calling must hold sockem_lock. */
-        LIST_REMOVE(skm, link);
 
         free(skm);
 }
