@@ -555,7 +555,7 @@ int connect (int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
         if (!skm)
                 return -1;
 
-        return 1;
+        return 0;
 }
 
 /**
