@@ -72,10 +72,13 @@ static LIST_HEAD(, sockem_s) sockems;
 
 typedef int64_t sockem_ts_t;
 
+#ifdef LIBSOCKEM_PRELOAD
 static pthread_once_t sockem_once = PTHREAD_ONCE_INIT;
 static int (*sockem_orig_connect) (int, const struct sockaddr *, socklen_t);
 static int (*sockem_orig_close) (int);
 static char *sockem_conf_str = "";
+#endif
+
 
 #ifdef LIBSOCKEM_PRELOAD
 #define sockem_close0(S)        (sockem_orig_close(S))
@@ -427,11 +430,10 @@ sockem_t *sockem_connect (int sockfd, const struct sockaddr *addr,
 
 #ifdef LIBSOCKEM_PRELOAD
         mtx_lock(&sockem_lock);
-#endif
         LIST_INSERT_HEAD(&sockems, skm, link);
-
-#ifdef LIBSOCKEM_PRELOAD
         mtx_unlock(&sockem_lock);
+#else
+        LIST_INSERT_HEAD(&sockems, skm, link);
 #endif
 
         return skm;
