@@ -565,7 +565,11 @@ sockem_t *sockem_find (int sockfd) {
 static void sockem_init (void) {
         mtx_init(&sockem_lock);
         sockem_conf_str = getenv("SOCKEM_CONF");
-        fprintf(stderr, "%% libsockem pre-loaded (%s)\n", sockem_conf_str);
+        if (!sockem_conf_str)
+                sockem_conf_str = "";
+        if (strstr(sockem_conf_str, "debug"))
+                fprintf(stderr, "%% libsockem pre-loaded (%s)\n",
+                        sockem_conf_str);
         sockem_orig_connect = dlsym(RTLD_NEXT, "connect");
         sockem_orig_close = dlsym(RTLD_NEXT, "close");
 }
