@@ -341,6 +341,7 @@ static int sockem_do_connect (int s, const struct sockaddr *addr,
         return 0;
 }
 
+
 sockem_t *sockem_connect (int sockfd, const struct sockaddr *addr,
                           socklen_t addrlen, ...) {
         sockem_t *skm;
@@ -419,7 +420,8 @@ sockem_t *sockem_connect (int sockfd, const struct sockaddr *addr,
         mtx_unlock(&skm->lock);
 
         /* Connect application socket to listen socket */
-        if (sockem_connect0(sockfd, (struct sockaddr *)&sin6, addrlen2) == -1) {
+        if (sockem_do_connect(sockfd,
+                              (struct sockaddr *)&sin6, addrlen2) == -1) {
                 sockem_close(skm);
                 return NULL;
         }
