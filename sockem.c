@@ -49,6 +49,16 @@
 #define SOCKET_ERROR -1
 #endif
 
+#ifndef strdupa
+#define strdupa(s)							\
+	({								\
+		const char *_s = (s);					\
+		size_t _len = strlen(_s)+1;				\
+		char *_d = (char *)alloca(_len);			\
+		(char *)memcpy(_d, _s, _len);				\
+	})
+#endif
+
 #include <pthread.h>
 typedef pthread_mutex_t mtx_t;
 #define mtx_init(M) pthread_mutex_init(M, NULL)
